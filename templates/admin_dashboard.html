@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #f4f7f6; margin: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        h1, h2 { border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        h1 { text-align: center; color: #333; }
+        h2 { color: #444; margin-top: 30px; }
+        .list-box { border: 1px solid #ccc; border-radius: 5px; margin-bottom: 20px; overflow: hidden; }
+        .list-header { background: #f9f9f9; padding: 10px 15px; font-size: 1.1em; font-weight: bold; border-bottom: 1px solid #ccc; display: flex; justify-content: space-between; align-items: center; }
+        .list-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; border-bottom: 1px solid #eee; }
+        .list-item:last-child { border-bottom: none; }
+        .item-name { font-weight: 500; color: #333; }
+        .item-actions { display: flex; gap: 5px; }
+        .item-actions form { margin: 0; }
+        
+        .item-actions .btn, .btn-create { 
+            border: none; padding: 6px 10px; border-radius: 4px; color: white; font-weight: bold; cursor: pointer; font-size: 0.9em; transition: background-color 0.2s; text-decoration: none; display: inline-block;
+        }
+
+        .btn-blacklist { background-color: #343a40; }
+        .btn-blacklist:hover { background-color: #23272b; }
+        .btn-whitelist { background-color: #28a745; }
+        .btn-whitelist:hover { background-color: #218838; }
+        .btn-edit { background-color: #ffc107; color: #333; }
+        .btn-edit:hover { background-color: #e0a800; }
+        .btn-delete { background-color: #dc3545; }
+        .btn-delete:hover { background-color: #c82333; }
+        .btn-create { background-color: #007bff; }
+        .btn-create:hover { background-color: #0069d9; }
+        
+        .is-blacklisted .item-name { color: #aaa; text-decoration: line-through; font-style: italic; }
+        .is-blacklisted .btn-blacklist { display: none; }
+        .is-blacklisted .btn-whitelist { display: inline-block; }
+        .btn-whitelist { display: none; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        
+        /* Flash messages */
+        .flash { padding: 15px; margin-bottom: 20px; border-radius: 5px; }
+        .flash-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .flash-danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .flash-warning { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Admin Dashboard</h1>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="flash flash-{{ category }}">{{ message }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        <h2>Registered Doctors</h2>
+        <div class="list-box">
+            <div class="list-header">
+                <span>Doctors</span>
+                <a href="{{ url_for('admin_add_doctor') }}" class="btn btn-create">Create</a>
+            </div>
+            {% for doctor in doctors %}
+            <div class="list-item {% if doctor.is_blacklisted %}is-blacklisted{% endif %}">
+                <span class="item-name">{{ doctor.name }} ({{ doctor.specialization }})</span>
+                <div class.item-actions">
+                    <button class="btn btn-edit">Edit</button>
+                    <button class="btn btn-delete">Delete</button>
+                    
+                    <form action="{{ url_for('admin_blacklist_doctor', doctor_id=doctor.id) }}" method="POST" class="btn-blacklist">
+                        <button type="submit" class="btn btn-blacklist">Blacklist</button>
+                    </form>
+                    <form action="{{ url_for('admin_whitelist_doctor', doctor_id=doctor.id) }}" method="POST" class="btn-whitelist">
+                        <button type="submit" class="btn btn-whitelist">Restore</button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <h2>Registered Patients</h2>
+        <div class="list-box">
+            <div class="list-header">Patients</div>
+            {% for patient in patients %}
+            <div class="list-item {% if patient.is_blacklisted %}is-blacklisted{% endif %}">
+                <span class="item-name">{{ patient.name }} ({{ patient.email }})</span>
+                <div class="item-actions">
+                    <button class="btn btn-edit">Edit</button>
+                    <button class="btn btn-delete">Delete</button>
+                    
+                    <form action="{{ url_for('admin_blacklist_patient', patient_id=patient.id) }}" method="POST" class="btn-blacklist">
+                        <button type="submit" class="btn btn-blacklist">Blacklist</button>
+                    </form>
+                    <form action="{{ url_for('admin_whitelist_patient', patient_id=patient.id) }}" method="POST" class="btn-whitelist">
+                        <button type="submit" class="btn btn-whitelist">Restore</button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <h2>Upcoming Appointments</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Sr No.</th>
+                    <th>Patient Name</th>
+                    <th>Doctor Name</th>
+                    <th>Department</th>
+                    <th>Date & Time</th>
+                    </tr>
+            </thead>
+            <tbody>
+                {% for appt in appointments %}
+                <tr>
+                    <td>{{ appt.id }}</td>
+                    <td>{{ appt.patient.name }}</td>
+                    <td>{{ appt.doctor.name }}</td>
+                    <td>{{ appt.doctor.department.name }}</td>
+                    <td>{{ appt.date.strftime('%Y-%m-%d') }} at {{ appt.time.strftime('%I:%M %p') }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5" style="text-align: center;">No upcoming appointments.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+    </div>
+
+</body>
+</html>
