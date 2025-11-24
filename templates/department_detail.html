@@ -8,7 +8,7 @@
     </div>
 </div>
 
-<div class="card">
+<div class="card mb-4">
     <div class="card-body">
         <h5 class="card-title">Overview</h5>
         <p class="card-text">{{ department.description | default('No description available.', true) }}</p>
@@ -21,7 +21,7 @@
     </div>
     <div class="card-body">
         <ul class="list-group list-group-flush">
-            {% for doc in department.doctors %}
+            {% for doc in doctors %}
             <li class="list-group-item d-flex justify-content-between align-items-center">
                 <div>
                     <strong>{{ doc.name }}</strong><br>
@@ -33,7 +33,7 @@
                 </div>
             </li>
             {% else %}
-            <li class="list-group-item">No doctors found in this department.</li>
+            <li class="list-group-item text-muted">No available doctors found in this department.</li>
             {% endfor %}
         </ul>
     </div>

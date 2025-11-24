@@ -32,6 +32,8 @@
         .btn-delete:hover { background-color: #c82333; }
         .btn-create { background-color: #007bff; }
         .btn-create:hover { background-color: #0069d9; }
+        .btn-view { background-color: #ffffff; color: #007bff; border: 1px solid #007bff; padding: 4px 12px; border-radius: 15px; font-size: 0.85em; }
+        .btn-view:hover { background-color: #eef6ff; }
         
         .is-blacklisted .item-name { color: #aaa; text-decoration: line-through; font-style: italic; }
         .is-blacklisted .btn-blacklist { display: none; }
@@ -43,7 +45,6 @@
         th { background-color: #f2f2f2; }
         tr:nth-child(even) { background-color: #f9f9f9; }
         
-        /* Flash messages */
         .flash { padding: 15px; margin-bottom: 20px; border-radius: 5px; }
         .flash-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
         .flash-danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
@@ -72,9 +73,12 @@
             {% for doctor in doctors %}
             <div class="list-item {% if doctor.is_blacklisted %}is-blacklisted{% endif %}">
                 <span class="item-name">{{ doctor.name }} ({{ doctor.specialization }})</span>
-                <div class.item-actions">
-                    <button class="btn btn-edit">Edit</button>
-                    <button class="btn btn-delete">Delete</button>
+                <div class="item-actions">
+                    <a href="{{ url_for('admin_edit_doctor', doctor_id=doctor.id) }}" class="btn btn-edit">Edit</a>
+                    
+                    <form action="{{ url_for('admin_delete_doctor', doctor_id=doctor.id) }}" method="POST" onsubmit="return confirm('Are you sure? This will delete all appointments for this doctor.');">
+                        <button type="submit" class="btn btn-delete">Delete</button>
+                    </form>
                     
                     <form action="{{ url_for('admin_blacklist_doctor', doctor_id=doctor.id) }}" method="POST" class="btn-blacklist">
                         <button type="submit" class="btn btn-blacklist">Blacklist</button>
@@ -94,8 +98,11 @@
             <div class="list-item {% if patient.is_blacklisted %}is-blacklisted{% endif %}">
                 <span class="item-name">{{ patient.name }} ({{ patient.email }})</span>
                 <div class="item-actions">
-                    <button class="btn btn-edit">Edit</button>
-                    <button class="btn btn-delete">Delete</button>
+                    <a href="{{ url_for('admin_edit_patient', patient_id=patient.id) }}" class="btn btn-edit">Edit</a>
+                    
+                    <form action="{{ url_for('admin_delete_patient', patient_id=patient.id) }}" method="POST" onsubmit="return confirm('Are you sure? This will delete the patient and their history.');">
+                        <button type="submit" class="btn btn-delete">Delete</button>
+                    </form>
                     
                     <form action="{{ url_for('admin_blacklist_patient', patient_id=patient.id) }}" method="POST" class="btn-blacklist">
                         <button type="submit" class="btn btn-blacklist">Blacklist</button>
@@ -117,20 +124,24 @@
                     <th>Doctor Name</th>
                     <th>Department</th>
                     <th>Date & Time</th>
-                    </tr>
+                    <th>Patient History</th>
+                </tr>
             </thead>
             <tbody>
                 {% for appt in appointments %}
                 <tr>
-                    <td>{{ appt.id }}</td>
+                    <td>{{ loop.index }}</td>
                     <td>{{ appt.patient.name }}</td>
                     <td>{{ appt.doctor.name }}</td>
                     <td>{{ appt.doctor.department.name }}</td>
                     <td>{{ appt.date.strftime('%Y-%m-%d') }} at {{ appt.time.strftime('%I:%M %p') }}</td>
+                    <td>
+                        <a href="{{ url_for('admin_patient_history_view', patient_id=appt.patient.id) }}" class="btn btn-view">view</a>
+                    </td>
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="5" style="text-align: center;">No upcoming appointments.</td>
+                    <td colspan="6" style="text-align: center;">No upcoming appointments.</td>
                 </tr>
                 {% endfor %}
             </tbody>
