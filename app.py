@@ -98,7 +98,7 @@ def dashboard():
 @login_required
 def department_detail(dept_id):
     department = Department.query.get_or_404(dept_id)
-    # FIX: Explicitly query for doctors who are NOT blacklisted
+    # Explicitly query for doctors who are NOT blacklisted
     active_doctors = Doctor.query.filter_by(
         department_id=dept_id, 
         is_blacklisted=False
@@ -288,26 +288,59 @@ def admin_edit_doctor(doctor_id):
 
     return render_template('edit_doctor.html', doctor=doctor, departments=departments)
 
-# --- DELETE ROUTES (NEW) ---
-@app.route('/admin/doctor/delete/<int:doctor_id>', methods=['POST'])
-def admin_delete_doctor(doctor_id):
-    doctor = Doctor.query.get_or_404(doctor_id)
-    # Manually delete appointments to avoid foreign key errors
-    Appointment.query.filter_by(doctor_id=doctor.id).delete()
-    db.session.delete(doctor)
-    db.session.commit()
-    flash(f'Dr. {doctor.name} and their appointments have been deleted.', 'success')
-    return redirect(url_for('admin_dashboard'))
+# --- PATIENT MANAGEMENT ROUTES (NEW) ---
+
+@app.route('/admin/patient/edit/<int:patient_id>', methods=['GET', 'POST'])
+def admin_edit_patient(patient_id):
+    patient = Patient.query.get_or_404(patient_id)
+
+    if request.method == 'POST':
+        name = request.form.get('name')
+        email = request.form.get('email')
+        age_str = request.form.get('age')
+        gender = request.form.get('gender')
+
+        # Check unique email (ignore if it belongs to the current patient)
+        existing_email_user = Patient.query.filter_by(email=email).first()
+        if existing_email_user and existing_email_user.id != patient.id:
+            flash('This email is already in use by another patient.', 'danger')
+            return render_template('edit_patient.html', patient=patient)
+
+        patient.name = name
+        patient.email = email
+        patient.age = int(age_str) if age_str else None
+        patient.gender = gender
+
+        try:
+            db.session.commit()
+            flash(f'Details for {patient.name} updated successfully.', 'success')
+            return redirect(url_for('admin_dashboard'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error updating record: {e}', 'danger')
+
+    return render_template('edit_patient.html', patient=patient)
 
 @app.route('/admin/patient/delete/<int:patient_id>', methods=['POST'])
 def admin_delete_patient(patient_id):
     patient = Patient.query.get_or_404(patient_id)
+    # Delete appointments first to satisfy foreign keys
     Appointment.query.filter_by(patient_id=patient.id).delete()
     db.session.delete(patient)
     db.session.commit()
     flash(f'Patient {patient.name} and their history have been deleted.', 'success')
     return redirect(url_for('admin_dashboard'))
-# ---------------------------
+
+# ----------------------------------------
+
+@app.route('/admin/doctor/delete/<int:doctor_id>', methods=['POST'])
+def admin_delete_doctor(doctor_id):
+    doctor = Doctor.query.get_or_404(doctor_id)
+    Appointment.query.filter_by(doctor_id=doctor.id).delete()
+    db.session.delete(doctor)
+    db.session.commit()
+    flash(f'Dr. {doctor.name} and their appointments have been deleted.', 'success')
+    return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/doctor/blacklist/<int:doctor_id>', methods=['POST'])
 def admin_blacklist_doctor(doctor_id):
@@ -340,6 +373,22 @@ def admin_whitelist_patient(patient_id):
     db.session.commit()
     flash(f'Patient {patient.name} has been restored.', 'success')
     return redirect(url_for('admin_dashboard'))
+
+# --- Add this NEW ROUTE to app.py (Under Admin Routes) ---
+
+# --- IN app.py ---
+
+@app.route('/admin/patient/history/view/<int:patient_id>')
+def admin_patient_history_view(patient_id):
+    patient = Patient.query.get_or_404(patient_id)
+    
+    # FIX: Removed the filter for 'Completed'. 
+    # Now it fetches ALL status types (Booked, Cancelled, Completed)
+    history = Appointment.query.filter(
+        Appointment.patient_id == patient.id
+    ).order_by(Appointment.date.desc()).all()
+    
+    return render_template('admin_patient_history.html', patient=patient, history=history)
 
 if __name__ == '__main__':
     with app.app_context():

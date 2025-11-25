@@ -18,7 +18,7 @@ class Department(db.Model):
         return f"<Department {self.name}>"
 
 # Doctor (MODIFIED)
-class Doctor(db.Model):
+class Doctor(db.Model, UserMixin): # <--- Added UserMixin
     __tablename__ = 'doctors'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False)
@@ -32,7 +32,17 @@ class Doctor(db.Model):
     # --- Field for 'Add Doctor' form ---
     experience = db.Column(db.Integer, nullable=True) 
     
+    # --- NEW: Password Fields ---
+    password_hash = db.Column(db.String(200), nullable=False, default='pbkdf2:sha256:260000$dummyhash') 
+
     appointments = db.relationship('Appointment', backref='doctor', lazy=True)
+
+    # --- NEW: Password Methods ---
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
 
     def __repr__(self):
         return f"<Doctor {self.name} ({self.specialization})>"
