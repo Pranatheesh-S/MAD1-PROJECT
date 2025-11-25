@@ -19,7 +19,7 @@ def load_user(user_id):
     # Check the session to see if we are loading a Doctor or a Patient
     role = session.get('role')
     if role == 'doctor':
-        return Doctor.query.get(int(user_id))
+        return db.session.get(Doctor, int(user_id))
     else:
         # Default to Patient
         return Patient.query.get(int(user_id))
@@ -95,14 +95,9 @@ def doctor_login():
         email = request.form['email']
         password = request.form['password']
         
-        # Print for debugging
-        print(f"Attempting login for: {email}") 
-        
         doctor = Doctor.query.filter_by(email=email).first()
 
         if doctor:
-            # Print found doctor
-            print(f"Doctor found: {doctor.name}") 
             if doctor.check_password(password):
                 if doctor.is_blacklisted:
                     flash('Your account has been suspended.', 'danger')
@@ -113,22 +108,17 @@ def doctor_login():
                 
                 # Set new session data
                 session['role'] = 'doctor'
-                session.permanent = True # Ensure session sticks
+                session.permanent = True 
                 login_user(doctor)
                 
-                print("Login successful, redirecting...")
                 flash(f'Welcome back, Dr. {doctor.name}', 'success')
                 return redirect(url_for('doctor_dashboard'))
             else:
-                print("Password check failed")
                 flash('Invalid password', 'danger')
         else:
-            print("No doctor found with that email")
             flash('Invalid email', 'danger')
 
     return render_template('doctor_login.html')
-
-# --- REMOVED doctor_signup ROUTE HERE ---
 
 @app.route('/logout')
 @login_required
@@ -260,7 +250,10 @@ def cancel_appointment(appt_id):
     appt.status = 'Cancelled'
     db.session.commit()
     flash('Appointment has been cancelled.', 'success')
-    return redirect(url_for('home'))
+    # Redirect back to the correct dashboard
+    if session.get('role') == 'doctor':
+        return redirect(url_for('doctor_dashboard'))
+    return redirect(url_for('dashboard'))
 
 @app.route('/history')
 @login_required
@@ -274,7 +267,7 @@ def patient_history():
     ).order_by(Appointment.date.desc(), Appointment.time.desc()).all()
     return render_template('patient_history.html', appointments=past_appts)
 
-# --- Dashboard Routes (DOCTOR - NEW) ---
+# --- Dashboard Routes (DOCTOR) ---
 
 @app.route('/doctor/dashboard')
 @login_required
@@ -294,6 +287,49 @@ def doctor_dashboard():
     return render_template('doctor_dashboard.html', 
                            doctor=current_user, 
                            appointments=upcoming_appts)
+
+# --- NEW DOCTOR ROUTES FOR DASHBOARD ACTIONS ---
+
+@app.route('/appointment/complete/<int:appt_id>', methods=['POST'])
+@login_required
+def mark_complete(appt_id):
+    if session.get('role') != 'doctor':
+        flash('Access denied.', 'danger')
+        return redirect(url_for('home'))
+        
+    appt = Appointment.query.get_or_404(appt_id)
+    
+    if appt.doctor_id != current_user.id:
+        flash('You cannot manage appointments that are not yours.', 'danger')
+        return redirect(url_for('doctor_dashboard'))
+        
+    appt.status = 'Completed'
+    db.session.commit()
+    flash(f'Appointment with {appt.patient.name} marked as complete.', 'success')
+    return redirect(url_for('doctor_dashboard'))
+
+@app.route('/appointment/update/<int:appt_id>', methods=['GET', 'POST'])
+@login_required
+def update_treatment(appt_id):
+    if session.get('role') != 'doctor':
+        flash('Access denied.', 'danger')
+        return redirect(url_for('home'))
+        
+    # Placeholder: In a real app, this would open a form to add diagnosis/prescription
+    flash('Update Patient History/Treatment feature coming soon!', 'info')
+    return redirect(url_for('doctor_dashboard'))
+
+@app.route('/doctor/availability', methods=['GET', 'POST'])
+@login_required
+def provide_availability():
+    if session.get('role') != 'doctor':
+        flash('Access denied.', 'danger')
+        return redirect(url_for('home'))
+        
+    # Placeholder for availability logic
+    flash('Availability settings updated (Demo).', 'success')
+    return redirect(url_for('doctor_dashboard'))
+
 
 # --- ADMIN ROUTES ---
 
@@ -319,7 +355,7 @@ def admin_add_doctor():
         specialization = request.form.get('specialization')
         department_id = request.form.get('department_id')
         experience_str = request.form.get('experience')
-        password = request.form.get('password') # <--- Get password from form
+        password = request.form.get('password') 
 
         existing = Doctor.query.filter_by(email=email).first()
         if existing:
@@ -336,7 +372,6 @@ def admin_add_doctor():
             department_id=int(department_id),
             experience=experience
         )
-        # Use the provided password, or default to '123' if empty
         new_doctor.set_password(password if password else '123') 
         
         db.session.add(new_doctor)

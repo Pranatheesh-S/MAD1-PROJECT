@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, session
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from models import db, Patient, Doctor, Department, Appointment, Treatment
 from datetime import datetime, date, time, timedelta
@@ -16,13 +16,21 @@ login_manager.login_message_category = 'info'
 
 @login_manager.user_loader
 def load_user(user_id):
-    return Patient.query.get(int(user_id))
+    # Check the session to see if we are loading a Doctor or a Patient
+    role = session.get('role')
+    if role == 'doctor':
+        return db.session.get(Doctor, int(user_id))
+    else:
+        # Default to Patient
+        return Patient.query.get(int(user_id))
 
-# --- Authentication Routes ---
+# --- Authentication Routes (PATIENT) ---
 
 @app.route('/')
 def home():
     if current_user.is_authenticated:
+        if session.get('role') == 'doctor':
+            return redirect(url_for('doctor_dashboard'))
         return redirect(url_for('dashboard'))
     return redirect(url_for('login'))
 
@@ -41,6 +49,8 @@ def login():
                 flash('Your account has been suspended. Please contact support.', 'danger')
                 return redirect(url_for('login'))
             
+            # CRITICAL: Set role before login
+            session['role'] = 'patient'
             login_user(patient)
             flash('Login successful!', 'success')
             return redirect(url_for('dashboard'))
@@ -70,18 +80,72 @@ def register():
             return redirect(url_for('login'))
     return render_template('register.html')
 
+# --- Authentication Routes (DOCTOR) ---
+
+@app.route('/doctor', methods=['GET', 'POST'])
+def doctor_login():
+    if current_user.is_authenticated:
+        if session.get('role') == 'doctor':
+            return redirect(url_for('doctor_dashboard'))
+        else:
+            flash('You are logged in as a patient. Please logout first.', 'warning')
+            return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        email = request.form['email']
+        password = request.form['password']
+        
+        # Print for debugging
+        print(f"Attempting login for: {email}") 
+        
+        doctor = Doctor.query.filter_by(email=email).first()
+
+        if doctor:
+            # Print found doctor
+            print(f"Doctor found: {doctor.name}") 
+            if doctor.check_password(password):
+                if doctor.is_blacklisted:
+                    flash('Your account has been suspended.', 'danger')
+                    return redirect(url_for('doctor_login'))
+
+                # Explicitly clear any old session data
+                session.clear() 
+                
+                # Set new session data
+                session['role'] = 'doctor'
+                session.permanent = True # Ensure session sticks
+                login_user(doctor)
+                
+                print("Login successful, redirecting...")
+                flash(f'Welcome back, Dr. {doctor.name}', 'success')
+                return redirect(url_for('doctor_dashboard'))
+            else:
+                print("Password check failed")
+                flash('Invalid password', 'danger')
+        else:
+            print("No doctor found with that email")
+            flash('Invalid email', 'danger')
+
+    return render_template('doctor_login.html')
+
+# --- REMOVED doctor_signup ROUTE HERE ---
+
 @app.route('/logout')
 @login_required
 def logout():
+    session.pop('role', None) # Clear the role
     logout_user()
     flash('You have been logged out.', 'success')
     return redirect(url_for('login'))
 
-# --- Dashboard Routes ---
+# --- Dashboard Routes (PATIENT) ---
 
 @app.route('/dashboard')
 @login_required
 def dashboard():
+    if session.get('role') == 'doctor':
+         return redirect(url_for('doctor_dashboard'))
+         
     departments = Department.query.all()
     upcoming_appts = Appointment.query.filter(
         Appointment.patient_id == current_user.id,
@@ -98,17 +162,10 @@ def dashboard():
 @login_required
 def department_detail(dept_id):
     department = Department.query.get_or_404(dept_id)
-    # Explicitly query for doctors who are NOT blacklisted
-    active_doctors = Doctor.query.filter_by(
-        department_id=dept_id, 
-        is_blacklisted=False
-    ).all()
-    
-    return render_template('department_detail.html', 
-                           department=department, 
-                           doctors=active_doctors) 
+    active_doctors = Doctor.query.filter_by(department_id=dept_id, is_blacklisted=False).all()
+    return render_template('department_detail.html', department=department, doctors=active_doctors) 
 
-@app.route('/doctor/<int:doctor_id>')
+@app.route('/doctor/profile/<int:doctor_id>') 
 @login_required
 def doctor_detail(doctor_id):
     doctor = Doctor.query.get_or_404(doctor_id)
@@ -120,6 +177,10 @@ def doctor_detail(doctor_id):
 @app.route('/book/<int:doctor_id>', methods=['GET', 'POST'])
 @login_required
 def book_appointment(doctor_id):
+    if session.get('role') == 'doctor':
+        flash("Doctors cannot book appointments for themselves.", "warning")
+        return redirect(url_for('doctor_dashboard'))
+
     doctor = Doctor.query.get_or_404(doctor_id)
     if doctor.is_blacklisted:
         flash('This doctor is no longer available for booking.', 'warning')
@@ -182,30 +243,57 @@ def book_appointment(doctor_id):
             slots_for_day['slots'].append({'time': slot_time, 'is_booked': is_booked})
         availability_data.append(slots_for_day)
     
-    return render_template('book_appointment.html', 
-                           doctor=doctor, 
-                           availability_data=availability_data)
+    return render_template('book_appointment.html', doctor=doctor, availability_data=availability_data)
 
 @app.route('/appointment/cancel/<int:appt_id>', methods=['POST'])
 @login_required
 def cancel_appointment(appt_id):
     appt = Appointment.query.get_or_404(appt_id)
-    if appt.patient_id != current_user.id:
-        flash('You do not have permission to cancel this appointment.', 'danger')
-        return redirect(url_for('dashboard'))
+    # Allow patient to cancel own, or doctor to cancel their patient's
+    is_patient_owner = (session.get('role') == 'patient' and appt.patient_id == current_user.id)
+    is_doctor_owner = (session.get('role') == 'doctor' and appt.doctor_id == current_user.id)
+
+    if not (is_patient_owner or is_doctor_owner):
+        flash('Permission denied.', 'danger')
+        return redirect(url_for('home'))
+        
     appt.status = 'Cancelled'
     db.session.commit()
     flash('Appointment has been cancelled.', 'success')
-    return redirect(url_for('dashboard'))
+    return redirect(url_for('home'))
 
 @app.route('/history')
 @login_required
 def patient_history():
+    if session.get('role') != 'patient':
+        return redirect(url_for('home'))
+
     past_appts = Appointment.query.filter(
         Appointment.patient_id == current_user.id,
         Appointment.status.in_(['Completed', 'Cancelled'])
     ).order_by(Appointment.date.desc(), Appointment.time.desc()).all()
     return render_template('patient_history.html', appointments=past_appts)
+
+# --- Dashboard Routes (DOCTOR - NEW) ---
+
+@app.route('/doctor/dashboard')
+@login_required
+def doctor_dashboard():
+    # Security check: Ensure strictly a doctor is accessing this
+    if session.get('role') != 'doctor':
+        flash('Access denied.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    # Get appointments for this doctor
+    upcoming_appts = Appointment.query.filter(
+        Appointment.doctor_id == current_user.id,
+        Appointment.date >= date.today(),
+        Appointment.status == 'Booked'
+    ).order_by(Appointment.date, Appointment.time).all()
+
+    return render_template('doctor_dashboard.html', 
+                           doctor=current_user, 
+                           appointments=upcoming_appts)
 
 # --- ADMIN ROUTES ---
 
@@ -231,6 +319,7 @@ def admin_add_doctor():
         specialization = request.form.get('specialization')
         department_id = request.form.get('department_id')
         experience_str = request.form.get('experience')
+        password = request.form.get('password') # <--- Get password from form
 
         existing = Doctor.query.filter_by(email=email).first()
         if existing:
@@ -247,6 +336,9 @@ def admin_add_doctor():
             department_id=int(department_id),
             experience=experience
         )
+        # Use the provided password, or default to '123' if empty
+        new_doctor.set_password(password if password else '123') 
+        
         db.session.add(new_doctor)
         db.session.commit()
         flash(f'Dr. {new_doctor.name} has been added successfully.', 'success')
@@ -288,8 +380,6 @@ def admin_edit_doctor(doctor_id):
 
     return render_template('edit_doctor.html', doctor=doctor, departments=departments)
 
-# --- PATIENT MANAGEMENT ROUTES (NEW) ---
-
 @app.route('/admin/patient/edit/<int:patient_id>', methods=['GET', 'POST'])
 def admin_edit_patient(patient_id):
     patient = Patient.query.get_or_404(patient_id)
@@ -300,7 +390,6 @@ def admin_edit_patient(patient_id):
         age_str = request.form.get('age')
         gender = request.form.get('gender')
 
-        # Check unique email (ignore if it belongs to the current patient)
         existing_email_user = Patient.query.filter_by(email=email).first()
         if existing_email_user and existing_email_user.id != patient.id:
             flash('This email is already in use by another patient.', 'danger')
@@ -324,14 +413,11 @@ def admin_edit_patient(patient_id):
 @app.route('/admin/patient/delete/<int:patient_id>', methods=['POST'])
 def admin_delete_patient(patient_id):
     patient = Patient.query.get_or_404(patient_id)
-    # Delete appointments first to satisfy foreign keys
     Appointment.query.filter_by(patient_id=patient.id).delete()
     db.session.delete(patient)
     db.session.commit()
     flash(f'Patient {patient.name} and their history have been deleted.', 'success')
     return redirect(url_for('admin_dashboard'))
-
-# ----------------------------------------
 
 @app.route('/admin/doctor/delete/<int:doctor_id>', methods=['POST'])
 def admin_delete_doctor(doctor_id):
@@ -374,21 +460,15 @@ def admin_whitelist_patient(patient_id):
     flash(f'Patient {patient.name} has been restored.', 'success')
     return redirect(url_for('admin_dashboard'))
 
-# --- Add this NEW ROUTE to app.py (Under Admin Routes) ---
-
-# --- IN app.py ---
-
 @app.route('/admin/patient/history/view/<int:patient_id>')
 def admin_patient_history_view(patient_id):
     patient = Patient.query.get_or_404(patient_id)
-    
-    # FIX: Removed the filter for 'Completed'. 
-    # Now it fetches ALL status types (Booked, Cancelled, Completed)
     history = Appointment.query.filter(
         Appointment.patient_id == patient.id
     ).order_by(Appointment.date.desc()).all()
-    
     return render_template('admin_patient_history.html', patient=patient, history=history)
+
+# --- RUN / DEMO DATA ---
 
 if __name__ == '__main__':
     with app.app_context():
@@ -396,31 +476,32 @@ if __name__ == '__main__':
         # Demo data setup
         if not Department.query.first():
             print("Creating demo data...")
-            dept1 = Department(name='Cardiology', description='Specializing in heart-related issues.')
+            dept1 = Department(name='Cardiology', description='Heart issues.')
             dept2 = Department(name='Oncology', description='Cancer treatment.')
             dept3 = Department(name='General', description='General health.')
             db.session.add_all([dept1, dept2, dept3])
             db.session.commit()
 
+            # Doctors now have passwords! (default: 'doctor123')
             doc1 = Doctor(name='Dr. Abcde', email='abcde@hospital.com', specialization='Cardiologist', department=dept1, experience=10)
+            doc1.set_password('doctor123')
+            
             doc2 = Doctor(name='Dr. Pqrst', email='pqrst@hospital.com', specialization='Cardiologist', department=dept1, experience=5)
+            doc2.set_password('doctor123')
+
             doc3 = Doctor(name='Dr. Mnop', email='mnop@hospital.com', specialization='Medical Oncologist', department=dept2, experience=8)
+            doc3.set_password('doctor123')
+
             db.session.add_all([doc1, doc2, doc3])
             
-            demo_patient = Patient(name='Pqrst', email='pqrst@test.com', age=30, gender='Male')
+            demo_patient = Patient(name='John Doe', email='john@test.com', age=30, gender='Male')
             demo_patient.set_password('123')
             db.session.add(demo_patient)
             db.session.commit()
             
             appt1 = Appointment(patient=demo_patient, doctor=doc3, date=date(2025, 9, 24), time=time(8, 12), status='Booked')
-            appt2 = Appointment(patient=demo_patient, doctor=doc1, date=date(2025, 8, 10), time=time(10, 0), status='Completed')
-            appt_booked = Appointment(patient=demo_patient, doctor=doc1, date=date.today() + timedelta(days=2), time=time(8, 0), status='Booked')
-            db.session.add_all([appt1, appt2, appt_booked])
+            db.session.add(appt1)
             db.session.commit()
-            
-            treat1 = Treatment(appointment=appt2, diagnosis='Abnormal Heartbeats', prescription='Exercise daily', notes='Patient is recovering well.')
-            db.session.add(treat1)
-            db.session.commit()
-            print("Demo data created.")
+            print("Demo data created with Doctor password 'doctor123' and Patient password '123'.")
 
     app.run(debug=True)
