@@ -42,6 +42,12 @@
                         <label>Years of Experience</label>
                         <input type="number" name="experience" class="form-control">
                     </div>
+                    
+                    <div class="mb-3">
+                        <label>Biography / Profile</label>
+                        <textarea name="bio" class="form-control" rows="4" placeholder="Enter doctor's biography..."></textarea>
+                    </div>
+
                     <button type="submit" class="btn btn-primary">Add Doctor</button>
                     <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary">Cancel</a>
                 </form>

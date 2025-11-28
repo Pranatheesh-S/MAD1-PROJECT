@@ -1,7 +1,9 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from models import db, Patient, Doctor, Department, Appointment, Treatment
+from models import db, Patient, Doctor, Department, Appointment, Treatment, DoctorAvailability
 from datetime import datetime, date, time, timedelta
+from sqlalchemy import or_ # Explicitly import this for the search filter
+import json 
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///hospital.db'
@@ -16,13 +18,13 @@ login_manager.login_message_category = 'info'
 
 @login_manager.user_loader
 def load_user(user_id):
-    # Check the session to see if we are loading a Doctor or a Patient
     role = session.get('role')
     if role == 'doctor':
+        # FIX: Use db.session.get instead of Doctor.query.get
         return db.session.get(Doctor, int(user_id))
     else:
-        # Default to Patient
-        return Patient.query.get(int(user_id))
+        # FIX: Use db.session.get instead of Patient.query.get
+        return db.session.get(Patient, int(user_id))
 
 # --- Authentication Routes (PATIENT) ---
 
@@ -46,10 +48,9 @@ def login():
         
         if patient and patient.check_password(password):
             if patient.is_blacklisted:
-                flash('Your account has been suspended. Please contact support.', 'danger')
+                flash('Your account has been suspended.', 'danger')
                 return redirect(url_for('login'))
             
-            # CRITICAL: Set role before login
             session['role'] = 'patient'
             login_user(patient)
             flash('Login successful!', 'success')
@@ -95,45 +96,32 @@ def doctor_login():
         email = request.form['email']
         password = request.form['password']
         
-        # Print for debugging
-        print(f"Attempting login for: {email}") 
-        
         doctor = Doctor.query.filter_by(email=email).first()
 
         if doctor:
-            # Print found doctor
-            print(f"Doctor found: {doctor.name}") 
             if doctor.check_password(password):
                 if doctor.is_blacklisted:
                     flash('Your account has been suspended.', 'danger')
                     return redirect(url_for('doctor_login'))
 
-                # Explicitly clear any old session data
                 session.clear() 
-                
-                # Set new session data
                 session['role'] = 'doctor'
-                session.permanent = True # Ensure session sticks
+                session.permanent = True 
                 login_user(doctor)
                 
-                print("Login successful, redirecting...")
                 flash(f'Welcome back, Dr. {doctor.name}', 'success')
                 return redirect(url_for('doctor_dashboard'))
             else:
-                print("Password check failed")
                 flash('Invalid password', 'danger')
         else:
-            print("No doctor found with that email")
             flash('Invalid email', 'danger')
 
     return render_template('doctor_login.html')
 
-# --- REMOVED doctor_signup ROUTE HERE ---
-
 @app.route('/logout')
 @login_required
 def logout():
-    session.pop('role', None) # Clear the role
+    session.pop('role', None)
     logout_user()
     flash('You have been logged out.', 'success')
     return redirect(url_for('login'))
@@ -161,14 +149,16 @@ def dashboard():
 @app.route('/department/<int:dept_id>')
 @login_required
 def department_detail(dept_id):
-    department = Department.query.get_or_404(dept_id)
+    # FIX: Use db.get_or_404(Model, id)
+    department = db.get_or_404(Department, dept_id)
     active_doctors = Doctor.query.filter_by(department_id=dept_id, is_blacklisted=False).all()
     return render_template('department_detail.html', department=department, doctors=active_doctors) 
 
 @app.route('/doctor/profile/<int:doctor_id>') 
 @login_required
 def doctor_detail(doctor_id):
-    doctor = Doctor.query.get_or_404(doctor_id)
+    # FIX: Use db.get_or_404
+    doctor = db.get_or_404(Doctor, doctor_id)
     if doctor.is_blacklisted:
         flash('This doctor is no longer available.', 'warning')
         return redirect(url_for('dashboard'))
@@ -181,11 +171,13 @@ def book_appointment(doctor_id):
         flash("Doctors cannot book appointments for themselves.", "warning")
         return redirect(url_for('doctor_dashboard'))
 
-    doctor = Doctor.query.get_or_404(doctor_id)
+    # FIX: Use db.get_or_404
+    doctor = db.get_or_404(Doctor, doctor_id)
     if doctor.is_blacklisted:
         flash('This doctor is no longer available for booking.', 'warning')
         return redirect(url_for('dashboard'))
     
+    # --- POST REQUEST: HANDLE BOOKING ---
     if request.method == 'POST':
         try:
             selected_slot = request.form.get('selected_slot')
@@ -197,6 +189,21 @@ def book_appointment(doctor_id):
             appt_date = datetime.strptime(date_str, '%Y-%m-%d').date()
             appt_time = datetime.strptime(time_str, '%H:%M:%S').time()
 
+            # 1. Validation: Is Doctor Available?
+            avail_record = DoctorAvailability.query.filter_by(doctor_id=doctor.id, date=appt_date).first()
+            is_doctor_working = False
+            
+            if avail_record:
+                if appt_time.hour == 8 and avail_record.morning_available:
+                    is_doctor_working = True
+                elif appt_time.hour == 16 and avail_record.evening_available:
+                    is_doctor_working = True
+            
+            if not is_doctor_working:
+                flash('Doctor is not available at this time.', 'danger')
+                return redirect(url_for('book_appointment', doctor_id=doctor_id))
+
+            # 2. Validation: Is Slot Already Booked?
             existing = Appointment.query.filter_by(
                 doctor_id=doctor.id, 
                 date=appt_date, 
@@ -207,6 +214,7 @@ def book_appointment(doctor_id):
                 flash('This slot has just been booked. Please select another.', 'danger')
                 return redirect(url_for('book_appointment', doctor_id=doctor_id))
 
+            # 3. Create Appointment
             new_appt = Appointment(
                 patient_id=current_user.id,
                 doctor_id=doctor.id,
@@ -224,10 +232,12 @@ def book_appointment(doctor_id):
             db.session.rollback()
             return redirect(url_for('book_appointment', doctor_id=doctor_id))
 
+    # --- GET REQUEST: SHOW GRID ---
     standard_slots = [time(8, 0), time(16, 0)] 
     today = date.today()
     date_range = [today + timedelta(days=d) for d in range(7)]
     
+    # Fetch existing bookings
     existing_appts = Appointment.query.filter(
         Appointment.doctor_id == doctor.id,
         Appointment.date.in_(date_range),
@@ -235,12 +245,36 @@ def book_appointment(doctor_id):
     ).all()
     booked_slots = set((appt.date, appt.time) for appt in existing_appts)
     
+    # Fetch Doctor's Availability Settings
+    avail_settings = DoctorAvailability.query.filter(
+        DoctorAvailability.doctor_id == doctor.id,
+        DoctorAvailability.date.in_(date_range)
+    ).all()
+    avail_lookup = { a.date: a for a in avail_settings }
+
     availability_data = []
+    
     for day in date_range:
+        day_settings = avail_lookup.get(day)
         slots_for_day = {'date': day, 'slots': []}
+        
         for slot_time in standard_slots:
             is_booked = (day, slot_time) in booked_slots
-            slots_for_day['slots'].append({'time': slot_time, 'is_booked': is_booked})
+            
+            is_working = False
+            if day_settings:
+                if slot_time.hour == 8 and day_settings.morning_available:
+                    is_working = True
+                elif slot_time.hour == 16 and day_settings.evening_available:
+                    is_working = True
+            
+            is_available = is_working and not is_booked
+            
+            slots_for_day['slots'].append({
+                'time': slot_time, 
+                'is_available': is_available 
+            })
+            
         availability_data.append(slots_for_day)
     
     return render_template('book_appointment.html', doctor=doctor, availability_data=availability_data)
@@ -248,8 +282,8 @@ def book_appointment(doctor_id):
 @app.route('/appointment/cancel/<int:appt_id>', methods=['POST'])
 @login_required
 def cancel_appointment(appt_id):
-    appt = Appointment.query.get_or_404(appt_id)
-    # Allow patient to cancel own, or doctor to cancel their patient's
+    # FIX: Use db.get_or_404
+    appt = db.get_or_404(Appointment, appt_id)
     is_patient_owner = (session.get('role') == 'patient' and appt.patient_id == current_user.id)
     is_doctor_owner = (session.get('role') == 'doctor' and appt.doctor_id == current_user.id)
 
@@ -260,7 +294,9 @@ def cancel_appointment(appt_id):
     appt.status = 'Cancelled'
     db.session.commit()
     flash('Appointment has been cancelled.', 'success')
-    return redirect(url_for('home'))
+    if session.get('role') == 'doctor':
+        return redirect(url_for('doctor_dashboard'))
+    return redirect(url_for('dashboard'))
 
 @app.route('/history')
 @login_required
@@ -271,36 +307,260 @@ def patient_history():
     past_appts = Appointment.query.filter(
         Appointment.patient_id == current_user.id,
         Appointment.status.in_(['Completed', 'Cancelled'])
-    ).order_by(Appointment.date.desc(), Appointment.time.desc()).all()
+    ).order_by(Appointment.date.desc(), Appointment.time.desc()).all() 
+    
     return render_template('patient_history.html', appointments=past_appts)
 
-# --- Dashboard Routes (DOCTOR - NEW) ---
+# --- Dashboard Routes (DOCTOR) ---
 
 @app.route('/doctor/dashboard')
 @login_required
 def doctor_dashboard():
-    # Security check: Ensure strictly a doctor is accessing this
     if session.get('role') != 'doctor':
         flash('Access denied.', 'danger')
         return redirect(url_for('dashboard'))
 
-    # Get appointments for this doctor
+    # 1. Upcoming Appointments
     upcoming_appts = Appointment.query.filter(
         Appointment.doctor_id == current_user.id,
         Appointment.date >= date.today(),
-        Appointment.status == 'Booked'
+        Appointment.status == 'Booked' 
     ).order_by(Appointment.date, Appointment.time).all()
+
+    # 2. Assigned Patients
+    completed_appts = Appointment.query.filter_by(
+        doctor_id=current_user.id,
+        status='Completed'
+    ).order_by(Appointment.date.desc()).all()
+
+    assigned_patients = []
+    seen_patient_ids = set()
+    for appt in completed_appts:
+        if appt.patient_id not in seen_patient_ids:
+            assigned_patients.append(appt.patient)
+            seen_patient_ids.add(appt.patient_id)
 
     return render_template('doctor_dashboard.html', 
                            doctor=current_user, 
-                           appointments=upcoming_appts)
+                           appointments=upcoming_appts,
+                           assigned_patients=assigned_patients)
+
+# ------------------------------------------------------------------
+# NEW: DOCTOR VIEWING PATIENT HISTORY
+# ------------------------------------------------------------------
+@app.route('/doctor/patient/history/<int:patient_id>')
+@login_required
+def doctor_patient_history(patient_id):
+    if session.get('role') != 'doctor':
+        flash('Access denied.', 'danger')
+        return redirect(url_for('home'))
+
+    # FIX: Use db.get_or_404
+    patient = db.get_or_404(Patient, patient_id)
+
+    # Fetch completed appointments for this specific doctor and patient
+    completed_history = Appointment.query.filter(
+        Appointment.patient_id == patient.id,
+        Appointment.doctor_id == current_user.id,
+        Appointment.status == 'Completed'
+    ).order_by(Appointment.date.desc(), Appointment.time.desc()).all()
+
+    return render_template('doctor_patient_history.html', 
+                           patient=patient, 
+                           history=completed_history,
+                           doctor_name=current_user.name)
+
+@app.route('/appointment/complete/<int:appt_id>', methods=['POST'])
+@login_required
+def mark_complete(appt_id):
+    if session.get('role') != 'doctor':
+        flash('Access denied.', 'danger')
+        return redirect(url_for('home'))
+        
+    # FIX: Use db.get_or_404
+    appt = db.get_or_404(Appointment, appt_id)
+    
+    if appt.doctor_id != current_user.id:
+        flash('You cannot manage appointments that are not yours.', 'danger')
+        return redirect(url_for('doctor_dashboard'))
+        
+    appt.status = 'Completed'
+    db.session.commit()
+    flash(f'Appointment with {appt.patient.name} marked as complete.', 'success')
+    return redirect(url_for('doctor_dashboard'))
+
+@app.route('/appointment/update/<int:appt_id>', methods=['GET', 'POST'])
+@login_required
+def update_treatment(appt_id):
+    if session.get('role') != 'doctor':
+        flash('Access denied.', 'danger')
+        return redirect(url_for('home'))
+        
+    # FIX: Use db.get_or_404
+    appt = db.get_or_404(Appointment, appt_id)
+    
+    if appt.doctor_id != current_user.id:
+        flash('You cannot edit this appointment.', 'danger')
+        return redirect(url_for('doctor_dashboard'))
+
+    treatment = appt.treatment
+    
+    if request.method == 'POST':
+        visit_type = request.form.get('visit_type')
+        test_done = request.form.get('test_done')
+        diagnosis = request.form.get('diagnosis')
+        prescription = request.form.get('prescription')
+        medicines_json = request.form.get('medicines_data') 
+        
+        if not treatment:
+            treatment = Treatment(appointment_id=appt.id)
+            db.session.add(treatment)
+        
+        treatment.visit_type = visit_type
+        treatment.test_done = test_done
+        treatment.diagnosis = diagnosis
+        treatment.prescription = prescription
+        treatment.medicines = medicines_json
+        
+        if appt.status == 'Booked':
+            appt.status = 'Completed'
+
+        db.session.commit()
+        flash('Patient history updated successfully!', 'success')
+        return redirect(url_for('doctor_dashboard'))
+
+    return render_template('update_treatment.html', appointment=appt, treatment=treatment)
+
+@app.route('/profile/edit', methods=['GET', 'POST'])
+@login_required
+def edit_profile():
+    # Ensure only patients can access this specific route
+    if session.get('role') != 'patient':
+        flash('Doctors should contact admin to edit their profiles.', 'warning')
+        return redirect(url_for('doctor_dashboard'))
+
+    # Check for and retrieve the error message from the session (and remove it)
+    email_error_message = session.pop('email_error', None)
+
+    if request.method == 'POST':
+        name = request.form.get('name')
+        email = request.form.get('email')
+        age_str = request.form.get('age')
+        gender = request.form.get('gender')
+
+        # Check if email is already taken by ANOTHER patient
+        existing_email = Patient.query.filter_by(email=email).first()
+        if existing_email and existing_email.id != current_user.id:
+            # Store the error in the session so it persists through the redirect
+            session['email_error'] = 'This email address is already registered to another account.'
+            return redirect(url_for('edit_profile'))
+
+        # Update current user details
+        current_user.name = name
+        current_user.email = email
+        current_user.age = int(age_str) if age_str else None
+        current_user.gender = gender
+
+        try:
+            db.session.commit()
+            flash('Your profile has been updated successfully!', 'success')
+            return redirect(url_for('dashboard'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'An error occurred while updating profile: {e}', 'danger')
+
+    # Pass the error message to the template
+    return render_template('edit_profile.html', email_error_message=email_error_message)
+
+@app.route('/doctor/availability', methods=['GET', 'POST'])
+@login_required
+def provide_availability():
+    if session.get('role') != 'doctor':
+        flash('Access denied.', 'danger')
+        return redirect(url_for('home'))
+    
+    today = date.today()
+    next_7_days = [today + timedelta(days=i) for i in range(7)]
+
+    if request.method == 'POST':
+        try:
+            for day in next_7_days:
+                day_str = day.strftime('%Y-%m-%d')
+                
+                morning_status = request.form.get(f'morning_{day_str}') == 'on'
+                evening_status = request.form.get(f'evening_{day_str}') == 'on'
+                
+                avail_record = DoctorAvailability.query.filter_by(
+                    doctor_id=current_user.id, date=day
+                ).first()
+                
+                if not avail_record:
+                    avail_record = DoctorAvailability(
+                        doctor_id=current_user.id,
+                        date=day
+                    )
+                    db.session.add(avail_record)
+                
+                avail_record.morning_available = morning_status
+                avail_record.evening_available = evening_status
+            
+            db.session.commit()
+            flash('Availability schedule updated successfully.', 'success')
+            return redirect(url_for('doctor_dashboard'))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error updating availability: {e}', 'danger')
+
+    existing_availability = DoctorAvailability.query.filter(
+        DoctorAvailability.doctor_id == current_user.id,
+        DoctorAvailability.date.in_(next_7_days)
+    ).all()
+    
+    availability_map = { record.date: record for record in existing_availability }
+    
+    display_data = []
+    for day in next_7_days:
+        record = availability_map.get(day)
+        display_data.append({
+            'date_obj': day,
+            'formatted_date': day.strftime('%d/%m/%Y'),
+            'iso_date': day.strftime('%Y-%m-%d'),
+            'morning': record.morning_available if record else False,
+            'evening': record.evening_available if record else False
+        })
+
+    return render_template('doctor_availability.html', availability_data=display_data)
 
 # --- ADMIN ROUTES ---
 
 @app.route('/admin-434345ndfsdj') 
 def admin_dashboard():
-    doctors = Doctor.query.order_by(Doctor.name).all()
-    patients = Patient.query.order_by(Patient.name).all()
+    # ----------------------------------------------------
+    # UPDATED: SEARCH FUNCTIONALITY
+    # ----------------------------------------------------
+    search_query = request.args.get('q', '').strip()
+    
+    if search_query:
+        search_pattern = f"%{search_query}%"
+        
+        # Filter Doctors: Name OR Email matching the pattern
+        doctors = Doctor.query.filter(
+            (Doctor.name.like(search_pattern)) | 
+            (Doctor.email.like(search_pattern))
+        ).order_by(Doctor.name).all()
+        
+        # Filter Patients: Name OR Email matching the pattern
+        patients = Patient.query.filter(
+            (Patient.name.like(search_pattern)) | 
+            (Patient.email.like(search_pattern))
+        ).order_by(Patient.name).all()
+    else:
+        # Default view: Show all
+        doctors = Doctor.query.order_by(Doctor.name).all()
+        patients = Patient.query.order_by(Patient.name).all()
+
+    # Upcoming Appointments (Same as before)
     upcoming_appts = Appointment.query.filter(
         Appointment.date >= date.today(),
         Appointment.status == 'Booked'
@@ -319,7 +579,9 @@ def admin_add_doctor():
         specialization = request.form.get('specialization')
         department_id = request.form.get('department_id')
         experience_str = request.form.get('experience')
-        password = request.form.get('password') # <--- Get password from form
+        password = request.form.get('password') 
+        # --- NEW: GET BIO ---
+        bio = request.form.get('bio')
 
         existing = Doctor.query.filter_by(email=email).first()
         if existing:
@@ -334,9 +596,9 @@ def admin_add_doctor():
             email=email,
             specialization=specialization,
             department_id=int(department_id),
-            experience=experience
+            experience=experience,
+            bio=bio  # --- NEW: SAVE BIO ---
         )
-        # Use the provided password, or default to '123' if empty
         new_doctor.set_password(password if password else '123') 
         
         db.session.add(new_doctor)
@@ -349,7 +611,7 @@ def admin_add_doctor():
 
 @app.route('/admin/doctor/edit/<int:doctor_id>', methods=['GET', 'POST'])
 def admin_edit_doctor(doctor_id):
-    doctor = Doctor.query.get_or_404(doctor_id)
+    doctor = db.get_or_404(Doctor, doctor_id)
     departments = Department.query.all()
 
     if request.method == 'POST':
@@ -358,6 +620,8 @@ def admin_edit_doctor(doctor_id):
         specialization = request.form.get('specialization')
         department_id = request.form.get('department_id')
         experience_str = request.form.get('experience')
+        # --- NEW: GET BIO ---
+        bio = request.form.get('bio')
 
         existing_email_user = Doctor.query.filter_by(email=email).first()
         if existing_email_user and existing_email_user.id != doctor.id:
@@ -369,6 +633,7 @@ def admin_edit_doctor(doctor_id):
         doctor.specialization = specialization
         doctor.department_id = int(department_id)
         doctor.experience = int(experience_str) if experience_str else None
+        doctor.bio = bio # --- NEW: UPDATE BIO ---
 
         try:
             db.session.commit()
@@ -382,7 +647,8 @@ def admin_edit_doctor(doctor_id):
 
 @app.route('/admin/patient/edit/<int:patient_id>', methods=['GET', 'POST'])
 def admin_edit_patient(patient_id):
-    patient = Patient.query.get_or_404(patient_id)
+    # FIX: Use db.get_or_404
+    patient = db.get_or_404(Patient, patient_id)
 
     if request.method == 'POST':
         name = request.form.get('name')
@@ -412,7 +678,8 @@ def admin_edit_patient(patient_id):
 
 @app.route('/admin/patient/delete/<int:patient_id>', methods=['POST'])
 def admin_delete_patient(patient_id):
-    patient = Patient.query.get_or_404(patient_id)
+    # FIX: Use db.get_or_404
+    patient = db.get_or_404(Patient, patient_id)
     Appointment.query.filter_by(patient_id=patient.id).delete()
     db.session.delete(patient)
     db.session.commit()
@@ -421,7 +688,8 @@ def admin_delete_patient(patient_id):
 
 @app.route('/admin/doctor/delete/<int:doctor_id>', methods=['POST'])
 def admin_delete_doctor(doctor_id):
-    doctor = Doctor.query.get_or_404(doctor_id)
+    # FIX: Use db.get_or_404
+    doctor = db.get_or_404(Doctor, doctor_id)
     Appointment.query.filter_by(doctor_id=doctor.id).delete()
     db.session.delete(doctor)
     db.session.commit()
@@ -430,7 +698,8 @@ def admin_delete_doctor(doctor_id):
 
 @app.route('/admin/doctor/blacklist/<int:doctor_id>', methods=['POST'])
 def admin_blacklist_doctor(doctor_id):
-    doctor = Doctor.query.get_or_404(doctor_id)
+    # FIX: Use db.get_or_404
+    doctor = db.get_or_404(Doctor, doctor_id)
     doctor.is_blacklisted = True
     db.session.commit()
     flash(f'Dr. {doctor.name} has been blacklisted.', 'success')
@@ -438,7 +707,8 @@ def admin_blacklist_doctor(doctor_id):
 
 @app.route('/admin/doctor/whitelist/<int:doctor_id>', methods=['POST'])
 def admin_whitelist_doctor(doctor_id):
-    doctor = Doctor.query.get_or_404(doctor_id)
+    # FIX: Use db.get_or_404
+    doctor = db.get_or_404(Doctor, doctor_id)
     doctor.is_blacklisted = False
     db.session.commit()
     flash(f'Dr. {doctor.name} has been restored.', 'success')
@@ -446,7 +716,8 @@ def admin_whitelist_doctor(doctor_id):
 
 @app.route('/admin/patient/blacklist/<int:patient_id>', methods=['POST'])
 def admin_blacklist_patient(patient_id):
-    patient = Patient.query.get_or_404(patient_id)
+    # FIX: Use db.get_or_404
+    patient = db.get_or_404(Patient, patient_id)
     patient.is_blacklisted = True
     db.session.commit()
     flash(f'Patient {patient.name} has been blacklisted.', 'success')
@@ -454,7 +725,8 @@ def admin_blacklist_patient(patient_id):
 
 @app.route('/admin/patient/whitelist/<int:patient_id>', methods=['POST'])
 def admin_whitelist_patient(patient_id):
-    patient = Patient.query.get_or_404(patient_id)
+    # FIX: Use db.get_or_404
+    patient = db.get_or_404(Patient, patient_id)
     patient.is_blacklisted = False
     db.session.commit()
     flash(f'Patient {patient.name} has been restored.', 'success')
@@ -462,7 +734,8 @@ def admin_whitelist_patient(patient_id):
 
 @app.route('/admin/patient/history/view/<int:patient_id>')
 def admin_patient_history_view(patient_id):
-    patient = Patient.query.get_or_404(patient_id)
+    # FIX: Use db.get_or_404
+    patient = db.get_or_404(Patient, patient_id)
     history = Appointment.query.filter(
         Appointment.patient_id == patient.id
     ).order_by(Appointment.date.desc()).all()
@@ -483,13 +756,14 @@ if __name__ == '__main__':
             db.session.commit()
 
             # Doctors now have passwords! (default: 'doctor123')
-            doc1 = Doctor(name='Dr. Abcde', email='abcde@hospital.com', specialization='Cardiologist', department=dept1, experience=10)
+            # --- NEW: Added bio strings ---
+            doc1 = Doctor(name='Dr. Abcde', email='abcde@hospital.com', specialization='Cardiologist', department=dept1, experience=10, bio="Expert in heart surgeries.")
             doc1.set_password('doctor123')
             
-            doc2 = Doctor(name='Dr. Pqrst', email='pqrst@hospital.com', specialization='Cardiologist', department=dept1, experience=5)
+            doc2 = Doctor(name='Dr. Pqrst', email='pqrst@hospital.com', specialization='Cardiologist', department=dept1, experience=5, bio="Specialist in preventive cardiology.")
             doc2.set_password('doctor123')
 
-            doc3 = Doctor(name='Dr. Mnop', email='mnop@hospital.com', specialization='Medical Oncologist', department=dept2, experience=8)
+            doc3 = Doctor(name='Dr. Mnop', email='mnop@hospital.com', specialization='Medical Oncologist', department=dept2, experience=8, bio="Focuses on immunotherapy.")
             doc3.set_password('doctor123')
 
             db.session.add_all([doc1, doc2, doc3])

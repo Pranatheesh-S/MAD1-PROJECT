@@ -10,6 +10,18 @@
         h1, h2 { border-bottom: 2px solid #eee; padding-bottom: 10px; }
         h1 { text-align: center; color: #333; }
         h2 { color: #444; margin-top: 30px; }
+        
+        /* --- Search Bar Styles (NEW) --- */
+        .search-container { display: flex; justify-content: center; margin-bottom: 25px; margin-top: 20px; }
+        .search-form { display: flex; align-items: center; }
+        .search-input { padding: 10px 15px; font-size: 1rem; border: 1px solid #ccc; border-radius: 4px 0 0 4px; width: 300px; outline: none; }
+        .search-input:focus { border-color: #007bff; }
+        .btn-search { padding: 11px 20px; background-color: #007bff; color: white; border: none; border-radius: 0 4px 4px 0; cursor: pointer; font-weight: bold; }
+        .btn-search:hover { background-color: #0056b3; }
+        .btn-clear { margin-left: 10px; padding: 11px 15px; background-color: #6c757d; color: white; text-decoration: none; border-radius: 4px; font-size: 0.9em; }
+        .btn-clear:hover { background-color: #545b62; }
+
+        /* List Styles */
         .list-box { border: 1px solid #ccc; border-radius: 5px; margin-bottom: 20px; overflow: hidden; }
         .list-header { background: #f9f9f9; padding: 10px 15px; font-size: 1.1em; font-weight: bold; border-bottom: 1px solid #ccc; display: flex; justify-content: space-between; align-items: center; }
         .list-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; border-bottom: 1px solid #eee; }
@@ -18,10 +30,8 @@
         .item-actions { display: flex; gap: 5px; }
         .item-actions form { margin: 0; }
         
-        .item-actions .btn, .btn-create { 
-            border: none; padding: 6px 10px; border-radius: 4px; color: white; font-weight: bold; cursor: pointer; font-size: 0.9em; transition: background-color 0.2s; text-decoration: none; display: inline-block;
-        }
-
+        /* Buttons */
+        .item-actions .btn, .btn-create { border: none; padding: 6px 10px; border-radius: 4px; color: white; font-weight: bold; cursor: pointer; font-size: 0.9em; transition: background-color 0.2s; text-decoration: none; display: inline-block; }
         .btn-blacklist { background-color: #343a40; }
         .btn-blacklist:hover { background-color: #23272b; }
         .btn-whitelist { background-color: #28a745; }
@@ -32,19 +42,22 @@
         .btn-delete:hover { background-color: #c82333; }
         .btn-create { background-color: #007bff; }
         .btn-create:hover { background-color: #0069d9; }
-        .btn-view { background-color: #ffffff; color: #007bff; border: 1px solid #007bff; padding: 4px 12px; border-radius: 15px; font-size: 0.85em; }
+        .btn-view { background-color: #ffffff; color: #007bff; border: 1px solid #007bff; padding: 4px 12px; border-radius: 15px; font-size: 0.85em; text-decoration: none; }
         .btn-view:hover { background-color: #eef6ff; }
         
+        /* States */
         .is-blacklisted .item-name { color: #aaa; text-decoration: line-through; font-style: italic; }
         .is-blacklisted .btn-blacklist { display: none; }
         .is-blacklisted .btn-whitelist { display: inline-block; }
         .btn-whitelist { display: none; }
 
+        /* Tables */
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
         th { background-color: #f2f2f2; }
         tr:nth-child(even) { background-color: #f9f9f9; }
         
+        /* Flash Messages */
         .flash { padding: 15px; margin-bottom: 20px; border-radius: 5px; }
         .flash-success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
         .flash-danger { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
@@ -64,55 +77,74 @@
           {% endif %}
         {% endwith %}
 
+        <div class="search-container">
+            <form action="{{ url_for('admin_dashboard') }}" method="GET" class="search-form">
+                <input type="text" name="q" class="search-input" placeholder="Search Doctor/Patient name or email..." value="{{ request.args.get('q', '') }}">
+                <button type="submit" class="btn-search">Search</button>
+                
+                {% if request.args.get('q') %}
+                    <a href="{{ url_for('admin_dashboard') }}" class="btn-clear">Clear</a>
+                {% endif %}
+            </form>
+        </div>
+
         <h2>Registered Doctors</h2>
         <div class="list-box">
             <div class="list-header">
                 <span>Doctors</span>
                 <a href="{{ url_for('admin_add_doctor') }}" class="btn btn-create">Create</a>
             </div>
-            {% for doctor in doctors %}
-            <div class="list-item {% if doctor.is_blacklisted %}is-blacklisted{% endif %}">
-                <span class="item-name">{{ doctor.name }} ({{ doctor.specialization }})</span>
-                <div class="item-actions">
-                    <a href="{{ url_for('admin_edit_doctor', doctor_id=doctor.id) }}" class="btn btn-edit">Edit</a>
-                    
-                    <form action="{{ url_for('admin_delete_doctor', doctor_id=doctor.id) }}" method="POST" onsubmit="return confirm('Are you sure? This will delete all appointments for this doctor.');">
-                        <button type="submit" class="btn btn-delete">Delete</button>
-                    </form>
-                    
-                    <form action="{{ url_for('admin_blacklist_doctor', doctor_id=doctor.id) }}" method="POST" class="btn-blacklist">
-                        <button type="submit" class="btn btn-blacklist">Blacklist</button>
-                    </form>
-                    <form action="{{ url_for('admin_whitelist_doctor', doctor_id=doctor.id) }}" method="POST" class="btn-whitelist">
-                        <button type="submit" class="btn btn-whitelist">Restore</button>
-                    </form>
+            {% if doctors %}
+                {% for doctor in doctors %}
+                <div class="list-item {% if doctor.is_blacklisted %}is-blacklisted{% endif %}">
+                    <span class="item-name">{{ doctor.name }} ({{ doctor.specialization }}) - {{ doctor.email }}</span>
+                    <div class="item-actions">
+                        <a href="{{ url_for('admin_edit_doctor', doctor_id=doctor.id) }}" class="btn btn-edit">Edit</a>
+                        
+                        <form action="{{ url_for('admin_delete_doctor', doctor_id=doctor.id) }}" method="POST" onsubmit="return confirm('Are you sure? This will delete all appointments for this doctor.');">
+                            <button type="submit" class="btn btn-delete">Delete</button>
+                        </form>
+                        
+                        <form action="{{ url_for('admin_blacklist_doctor', doctor_id=doctor.id) }}" method="POST" class="btn-blacklist">
+                            <button type="submit" class="btn btn-blacklist">Blacklist</button>
+                        </form>
+                        <form action="{{ url_for('admin_whitelist_doctor', doctor_id=doctor.id) }}" method="POST" class="btn-whitelist">
+                            <button type="submit" class="btn btn-whitelist">Restore</button>
+                        </form>
+                    </div>
                 </div>
-            </div>
-            {% endfor %}
+                {% endfor %}
+            {% else %}
+                <div style="padding:15px; text-align:center; color:#666;">No doctors found.</div>
+            {% endif %}
         </div>
 
         <h2>Registered Patients</h2>
         <div class="list-box">
             <div class="list-header">Patients</div>
-            {% for patient in patients %}
-            <div class="list-item {% if patient.is_blacklisted %}is-blacklisted{% endif %}">
-                <span class="item-name">{{ patient.name }} ({{ patient.email }})</span>
-                <div class="item-actions">
-                    <a href="{{ url_for('admin_edit_patient', patient_id=patient.id) }}" class="btn btn-edit">Edit</a>
-                    
-                    <form action="{{ url_for('admin_delete_patient', patient_id=patient.id) }}" method="POST" onsubmit="return confirm('Are you sure? This will delete the patient and their history.');">
-                        <button type="submit" class="btn btn-delete">Delete</button>
-                    </form>
-                    
-                    <form action="{{ url_for('admin_blacklist_patient', patient_id=patient.id) }}" method="POST" class="btn-blacklist">
-                        <button type="submit" class="btn btn-blacklist">Blacklist</button>
-                    </form>
-                    <form action="{{ url_for('admin_whitelist_patient', patient_id=patient.id) }}" method="POST" class="btn-whitelist">
-                        <button type="submit" class="btn btn-whitelist">Restore</button>
-                    </form>
+            {% if patients %}
+                {% for patient in patients %}
+                <div class="list-item {% if patient.is_blacklisted %}is-blacklisted{% endif %}">
+                    <span class="item-name">{{ patient.name }} ({{ patient.email }})</span>
+                    <div class="item-actions">
+                        <a href="{{ url_for('admin_edit_patient', patient_id=patient.id) }}" class="btn btn-edit">Edit</a>
+                        
+                        <form action="{{ url_for('admin_delete_patient', patient_id=patient.id) }}" method="POST" onsubmit="return confirm('Are you sure? This will delete the patient and their history.');">
+                            <button type="submit" class="btn btn-delete">Delete</button>
+                        </form>
+                        
+                        <form action="{{ url_for('admin_blacklist_patient', patient_id=patient.id) }}" method="POST" class="btn-blacklist">
+                            <button type="submit" class="btn btn-blacklist">Blacklist</button>
+                        </form>
+                        <form action="{{ url_for('admin_whitelist_patient', patient_id=patient.id) }}" method="POST" class="btn-whitelist">
+                            <button type="submit" class="btn btn-whitelist">Restore</button>
+                        </form>
+                    </div>
                 </div>
-            </div>
-            {% endfor %}
+                {% endfor %}
+            {% else %}
+                <div style="padding:15px; text-align:center; color:#666;">No patients found.</div>
+            {% endif %}
         </div>
 
         <h2>Upcoming Appointments</h2>

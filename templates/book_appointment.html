@@ -24,7 +24,7 @@
         text-align: center;
         font-weight: bold;
     }
-    /* Green slot, based on your wireframe */
+    /* Green slot: Available AND Doctor is working */
     .slot-available {
         border-color: #198754; /* Green */
         color: #198754;
@@ -34,15 +34,16 @@
     .slot-available:hover {
         background-color: #f0fff8;
     }
-    /* Red slot, based on your wireframe */
+    /* Red slot: Booked OR Doctor not working */
     .slot-unavailable {
         border-color: #dc3545; /* Red */
         color: #dc3545;
         background-color: #fdf2f3;
         text-decoration: line-through;
         opacity: 0.6;
+        cursor: not-allowed;
     }
-    /* Blue selected slot, based on your wireframe */
+    /* Blue selected slot */
     .slot-selected {
         border-color: #0d6efd; /* Blue */
         background-color: #e7f0ff;
@@ -57,13 +58,13 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h3>Doctor's Availability</h3>
     <div>
-        <a href="{{ url_for('doctor_detail', doctor_id=doctor.id) }}" class="btn btn-secondary btn-sm">Go Back</a>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-secondary btn-sm">Go Back</a>
     </div>
 </div>
 
 <div class="card">
     <div class="card-body">
-        <h4 class="card-title">with {{ doctor.name }}</h4>
+        <h4 class="card-title">Book with {{ doctor.name }}</h4>
         <h6 class="card-subtitle mb-4 text-muted">{{ doctor.specialization }}</h6>
         
         <form method="POST" action="{{ url_for('book_appointment', doctor_id=doctor.id) }}" id="booking-form">
@@ -71,20 +72,25 @@
             <input type="hidden" id="selected_slot_input" name="selected_slot" value="" required>
 
             <div class="slot-grid">
+                <div class="text-center fw-bold">Date</div>
+                <div class="text-center fw-bold">Morning (08:00 AM)</div>
+                <div class="text-center fw-bold">Evening (04:00 PM)</div>
+
                 {% for day_data in availability_data %}
                     
                     <div class="slot-date">
-                        {{ day_data.date.strftime('%d/%m/%Y') }}
+                        {{ day_data.date.strftime('%d/%m/%Y') }}<br>
+                        <small class="text-muted">{{ day_data.date.strftime('%A') }}</small>
                     </div>
                     
                     {% for slot in day_data.slots %}
-                        {% if slot.is_booked %}
-                            <div class="slot-time slot-unavailable">
+                        {% if slot.is_available %}
+                            <div class="slot-time slot-available" 
+                                 data-value="{{ day_data.date.isoformat() }}_{{ slot.time.isoformat() }}">
                                 {{ slot.time.strftime('%I:%M %p') }}
                             </div>
                         {% else %}
-                            <div class="slot-time slot-available" 
-                                 data-value="{{ day_data.date.isoformat() }}_{{ slot.time.isoformat() }}">
+                            <div class="slot-time slot-unavailable" title="Unavailable or Booked">
                                 {{ slot.time.strftime('%I:%M %p') }}
                             </div>
                         {% endif %}
@@ -94,8 +100,10 @@
             </div>
 
             <hr>
-            <button type="submit" id="book-button" class="btn btn-success" disabled>Book Selected Slot</button>
-            <small id="book-help" class="form-text text-muted ms-2">Please select an available slot (green) to book.</small>
+            <div class="d-flex align-items-center">
+                <button type="submit" id="book-button" class="btn btn-success" disabled>Book Selected Slot</button>
+                <small id="book-help" class="form-text text-muted ms-2">Please select a green slot to book.</small>
+            </div>
         </form>
     </div>
 </div>
@@ -104,35 +112,24 @@
 
 {% block scripts %}
 <script>
-    // Wait for the page to load
     document.addEventListener('DOMContentLoaded', function() {
-        
-        // Get all the important elements
-        const form = document.getElementById('booking-form');
         const hiddenInput = document.getElementById('selected_slot_input');
         const bookButton = document.getElementById('book-button');
         const bookHelp = document.getElementById('book-help');
-        
-        // Get all clickable (green) slots
         const availableSlots = document.querySelectorAll('.slot-available');
         
-        // Add a click listener to each available slot
         availableSlots.forEach(function(slot) {
             slot.addEventListener('click', function() {
-                
-                // 1. Remove 'selected' class from all other slots
+                // 1. Remove 'selected' from others
                 availableSlots.forEach(s => s.classList.remove('slot-selected'));
                 
-                // 2. Add 'selected' class (blue border) to the clicked slot
+                // 2. Add 'selected' to clicked
                 this.classList.add('slot-selected');
                 
-                // 3. Get the slot's value (e.g., "2025-11-10_08:00:00")
-                const slotValue = this.getAttribute('data-value');
+                // 3. Update hidden input
+                hiddenInput.value = this.getAttribute('data-value');
                 
-                // 4. Update the hidden input's value
-                hiddenInput.value = slotValue;
-                
-                // 5. Enable the "Book" button and hide the help text
+                // 4. Enable button
                 bookButton.disabled = false;
                 bookHelp.style.display = 'none';
             });

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Doctor Availability</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .availability-card {
+            background: white;
+            border: 2px solid #333;
+            border-radius: 4px;
+            padding: 20px 40px;
+            width: 100%;
+            max-width: 800px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .section-title {
+            font-size: 24px;
+            color: #333;
+            margin-bottom: 25px;
+            font-weight: 500;
+        }
+        
+        .row-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            gap: 15px;
+        }
+
+        /* Date Box Style */
+        .date-box {
+            background-color: #e6f2ff; /* Light blue/grey from image */
+            border: 2px solid #333;
+            padding: 10px;
+            text-align: center;
+            width: 150px;
+            font-weight: 600;
+            color: #333;
+            border-radius: 2px;
+        }
+
+        /* The hidden checkbox logic for toggling styles */
+        .slot-checkbox {
+            display: none;
+        }
+
+        /* Base Label Style (Unchecked = Red/Inactive look) */
+        .slot-label {
+            display: block;
+            width: 200px;
+            padding: 10px;
+            text-align: center;
+            border: 2px solid #dc3545; /* Red border */
+            background-color: #f8d7da; /* Light red bg */
+            color: #dc3545;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 2px;
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        /* Checked State (Green/Active look) */
+        .slot-checkbox:checked + .slot-label {
+            border-color: #198754; /* Green border */
+            background-color: #d1e7dd; /* Light green bg */
+            color: #198754;
+        }
+
+        .side-note {
+            color: #198754;
+            font-size: 0.9rem;
+            margin-top: 10px;
+            line-height: 1.4;
+        }
+        
+        .left-note {
+            color: #198754;
+            font-size: 0.9rem;
+            width: 100px;
+            position: absolute;
+            left: -120px;
+            top: 100px;
+        }
+        
+        .main-wrapper {
+            position: relative;
+        }
+
+        .btn-save {
+            border: 2px solid #198754;
+            color: #198754;
+            background: #e8f5e9;
+            font-weight: 600;
+            padding: 5px 30px;
+            border-radius: 8px; /* Rounded corners like image */
+            float: right;
+            margin-top: 20px;
+        }
+        .btn-save:hover {
+            background: #198754;
+            color: white;
+        }
+        
+        .back-link {
+            text-decoration: none;
+            color: #6c757d;
+            margin-bottom: 10px;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="main-wrapper">
+        <div class="availability-card">
+            <a href="{{ url_for('doctor_dashboard') }}" class="back-link">&larr; Back to Dashboard</a>
+            <h2 class="section-title">Doctor's Availability</h2>
+
+            <form method="POST">
+                
+                {% for item in availability_data %}
+                <div class="row-container">
+                    <div class="date-box">
+                        {{ item.formatted_date }}
+                    </div>
+
+                    <div>
+                        <input type="checkbox" id="morning_{{ loop.index }}" 
+                               name="morning_{{ item.iso_date }}" 
+                               class="slot-checkbox"
+                               {% if item.morning %}checked{% endif %}>
+                        <label for="morning_{{ loop.index }}" class="slot-label">
+                            08:00 - 12:00 am
+                        </label>
+                    </div>
+
+                    <div>
+                        <input type="checkbox" id="evening_{{ loop.index }}" 
+                               name="evening_{{ item.iso_date }}" 
+                               class="slot-checkbox"
+                               {% if item.evening %}checked{% endif %}>
+                        <label for="evening_{{ loop.index }}" class="slot-label">
+                            04:00 - 09:00 pm
+                        </label>
+                    </div>
+                </div>
+                {% endfor %}
+            </form>
+        </div>
+    </div>
+
+</body>
+</html>

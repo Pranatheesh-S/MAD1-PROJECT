@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Update Patient History</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #ffffff; font-family: sans-serif; }
+        .main-container {
+            max-width: 900px; margin: 40px auto;
+            border: 2px solid #333; padding: 20px;
+        }
+        .custom-input {
+            border: 2px solid #333; border-radius: 8px; padding: 10px; width: 100%; margin-bottom: 15px;
+        }
+        .medicine-box {
+            border: 2px solid #333; padding: 10px; min-height: 250px;
+        }
+        .medicine-header {
+            color: #8898aa; font-weight: 600; margin-bottom: 10px; display: flex; justify-content: space-between;
+        }
+        .medicine-row { display: flex; gap: 5px; margin-bottom: 5px; }
+        .med-name { width: 60%; padding: 4px; border: 1px solid #ccc; }
+        .med-dose { width: 30%; padding: 4px; border: 1px solid #ccc; }
+        .btn-remove { background: #dc3545; color: white; border: none; cursor: pointer; width: 10%;}
+        .btn-save {
+            border: 2px solid #28a745; color: #28a745; background: white;
+            font-weight: 600; padding: 5px 30px; border-radius: 5px; float: right;
+        }
+        .btn-save:hover { background: #28a745; color: white; }
+    </style>
+</head>
+<body>
+
+    <div class="main-container">
+        
+        <div class="mb-4">
+            <h3>Update Patient History</h3>
+            <div>Patient Name: Mr. {{ appointment.patient.name }}</div>
+            <div>Department: {{ appointment.doctor.department.name }}</div>
+        </div>
+
+        <form method="POST" id="historyForm">
+            <div class="row">
+                <div class="col-md-7">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label class="fw-bold text-muted small">Visit Type</label>
+                            <input type="text" name="visit_type" class="custom-input" value="{{ treatment.visit_type if treatment else '' }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="fw-bold text-muted small">Test Done</label>
+                            <input type="text" name="test_done" class="custom-input" value="{{ treatment.test_done if treatment else '' }}">
+                        </div>
+                    </div>
+                    
+                    <label class="fw-bold text-muted small">Diagnosis</label>
+                    <input type="text" name="diagnosis" class="custom-input" value="{{ treatment.diagnosis if treatment else '' }}">
+
+                    <label class="fw-bold text-muted small">Prescription</label>
+                    <textarea name="prescription" class="custom-input" rows="2">{{ treatment.prescription if treatment else '' }}</textarea>
+                </div>
+
+                <div class="col-md-5">
+                    <div class="medicine-box">
+                        <div class="medicine-header">
+                            Medicines
+                            <button type="button" class="btn btn-sm btn-dark" onclick="addMedicineRow()">+ Add</button>
+                        </div>
+                        <div id="medicine-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="d-flex justify-content-between align-items-end mt-3">
+                
+                <button type="submit" class="btn-save">save</button>
+            </div>
+
+            <input type="hidden" name="medicines_data" id="medicines_data">
+        </form>
+    </div>
+
+    <script>
+        // Load existing medicines safely
+        const existingMedicines = {{ treatment.get_medicines_list() | tojson if treatment else '[]' | safe }};
+        
+        function addMedicineRow(name = '', dose = '') {
+            const list = document.getElementById('medicine-list');
+            const row = document.createElement('div');
+            row.className = 'medicine-row';
+            row.innerHTML = `
+                <input type="text" class="med-name" placeholder="Medicine Name" value="${name}">
+                <input type="text" class="med-dose" placeholder="1-0-1" value="${dose}">
+                <button type="button" class="btn-remove" onclick="this.parentElement.remove()">X</button>
+            `;
+            list.appendChild(row);
+        }
+
+        // Initialize
+        if (existingMedicines.length > 0) {
+            existingMedicines.forEach(med => addMedicineRow(med.name, med.dose));
+        } else {
+            addMedicineRow(); addMedicineRow(); addMedicineRow(); // 3 empty rows default
+        }
+
+        // On Submit, serialize data
+        document.getElementById('historyForm').addEventListener('submit', function(e) {
+            const rows = document.querySelectorAll('.medicine-row');
+            let data = [];
+            rows.forEach(row => {
+                const name = row.querySelector('.med-name').value.trim();
+                const dose = row.querySelector('.med-dose').value.trim();
+                if (name) data.push({ name: name, dose: dose });
+            });
+            document.getElementById('medicines_data').value = JSON.stringify(data);
+        });
+    </script>
+
+</body>
+</html>
