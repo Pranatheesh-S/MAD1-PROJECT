@@ -21,4 +21,34 @@
     {% block scripts %}{% endblock %}
 
 </body>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+<script>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                // Map Flask categories to SweetAlert icons
+                var type = '{{ category }}';
+                if (type === 'danger') {
+                    type = 'error'; // SweetAlert uses 'error' for red X
+                } else if (type === 'info') {
+                    type = 'info';
+                } else if (type === 'warning') {
+                    type = 'warning';
+                } else if (type === 'success') {
+                    type = 'success';
+                }
+
+                // Fire the popup
+                Swal.fire({
+                    title: type.charAt(0).toUpperCase() + type.slice(1) + '!', // Capitalize title
+                    text: '{{ message }}',
+                    icon: type,
+                    confirmButtonText: 'OK',
+                    confirmButtonColor: '#0d6efd' // Bootstrap primary blue
+                });
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+</script>
 </html>
